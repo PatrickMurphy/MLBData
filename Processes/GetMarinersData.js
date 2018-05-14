@@ -9,6 +9,7 @@ var team = 'SEA';
 var DEBUG = false;
 var OUTPUT = true;
 var output_filename = 'MarinersHistory.csv';
+var LATEST_YEAR_ONLY = false;
 
 // program initial variables
 var NEW_LINE_STRING = "\r\n";
@@ -18,14 +19,21 @@ var season_last_wins = 0;
 var season_last_losses = 0;
 var addCount = 0;
 
+// ------------------------
 // initialize main program
+// ------------------------
 main_initialize();
 
+// --------------------
 // utility functions
+// --------------------
+
+// SYNC: Check if variable is defined
 function isDefined(check_var) {
 	return !(typeof check_var !== 'undefined');
 }
 
+// SYNC: Clone Object Variable
 function cloneObj(obj) {
 	if (null == obj || "object" != typeof obj) {
 		return obj;
@@ -40,62 +48,68 @@ function cloneObj(obj) {
 }
 
 // -----------------
-// main programs
+// Main Programs
 // -----------------
+// SYNC: Initialize Script
 function main_initialize() {
+	// If output is set, clear current file. Assumes Flat File output
 	if (OUTPUT) {
 		clearCSV();
 	}
+
+	// For every year in range, scrape every season that matches that year. Currently only one team (SEA)
 	for (year = year_range[0]; year <= year_range[1]; year++) {
-		if (DEBUG) {
+		// If Debug is set, only do one year.
+		if (DEBUG || LATEST_YEAR_ONLY) {
 			year = year_range[1];
 		}
+		// Create the url string, with team and year parameters
 		var url = 'https://www.baseball-reference.com/teams/' + team + '/' + year + '-schedule-scores.shtml';
-		var season = year + 0;
-		request(url, function (error, response, html) {
-			handle_page_request(error, response, html, season);
-		});
+
+		// Use request module to get html contents
+		request(url, handle_page_request);
 	}
 }
 
 // -----------------
-// program functions
+// Program Functions
 // -----------------
-function handle_page_request(error, response, html, season) {
+
+// ASYNC: Called for each Team Season combo
+function handle_page_request(error, response, html) {
 	if (!error) {
+		// keep season wins total for filling future games
 		season_last_wins = 0;
 		season_last_losses = 0;
-		var $ = cheerio.load(html);
-		$('#team_schedule>tbody>tr:not(.thead)').each(function (i, element) {
-			handle_season_schedule_row($, i, element, function (row) {
-				// set season
-				//row['season'] = season;
 
-				// parse numeric variables
+		// Load the html contents into a cheerio object
+		var $ = cheerio.load(html);
+
+		// Look for team schedule table rows that are not a heading or subtitle
+		$('#team_schedule>tbody>tr:not(.thead)').each(function (i, element) {
+			// for each row process row items
+			handle_season_schedule_row($, i, element, function (row) {
+				// parse numeric variables of row after gathering each source value
 				row = convert_season_schedule_row(row);
 
-				// code dummy and detail variables
+				// code dummy and detail variables using ETL proccess
 				row = ETL_season_schedule_row(row);
 
+				// add the data to the main data object
 				main_data.push(row);
 
-				if (OUTPUT) {
-					addToCSV([row]);
-				}
+				// if Output is set output the data, this should change by season or total rather than row
+				//if (OUTPUT) {
+				//	addToCSV([row]);
+				//}
 			});
 		});
-
-		if (DEBUG) {
-			console.log('INFO:', main_data.length);
-		}
 	} else {
-		console.log('ERROR: ', season, -1, response.statusCode, error);
-	}
-	if (DEBUG) {
-		console.log('INFO: ', main_data[0]);
+		console.log('ERROR: ', year, -1, response.statusCode, error);
 	}
 }
 
+// SYNC: extract the data from the HTML
 function handle_season_schedule_row($, i, element, callback) {
 	var ele = $(element);
 	var data = {};
@@ -124,6 +138,7 @@ function handle_season_schedule_row($, i, element, callback) {
 	callback(data);
 }
 
+// SYNC: convert the data to appropriate types
 function convert_season_schedule_row(input) {
 	var row = cloneObj(input);
 
@@ -153,6 +168,7 @@ function convert_season_schedule_row(input) {
 	return row;
 }
 
+// SYNC: transform variables to add new data 
 function ETL_season_schedule_row(input) {
 	var row = cloneObj(input);
 
@@ -229,10 +245,13 @@ function ETL_season_schedule_row(input) {
 // -----------------
 // Data Output
 // -----------------
+
+// SYNC: delete csv
 function clearCSV() {
 	fs.unlinkSync(output_filename);
 }
 
+// SYNC: create file and headers in program
 function createFileAndHeaders(fields) {
 	//write the headers and newline
 	console.log('INFO: ', 'New file, just writing headers');
@@ -243,6 +262,7 @@ function createFileAndHeaders(fields) {
 	});
 }
 
+// SYNC: add data to csv file
 function addToCSV(input) {
 	addCount++;
 	var fields = Object.keys(input[0]);
@@ -255,18 +275,20 @@ function addToCSV(input) {
 		hasCSVColumnTitle: false
 	};
 
-	fs.stat(output_filename, function (err, stat) {
-		if (!isDefined(stat) && addCount <= 1) {
-			createFileAndHeaders(fields);
-		}
-		//write the actual data and end with newline
-		var csv = jsonParser.parse(input, {
-			fields,
-			header: false
-		}) + NEW_LINE_STRING;
+	var stat = fs.statSync(output_filename);
+	//if (!isDefined(stat) && addCount <= 1) {
+	//	createFileAndHeaders(fields);
+	//}
 
-		fs.appendFile(output_filename, csv, function (err) {
-			if (err) throw err;
-		});
-	});
+	//write the actual data and end with newline
+	var csv = jsonParser.parse(input, {
+		fields,
+		header: false
+	}) + NEW_LINE_STRING;
+
+	var err_append = fs.appendFileSync(output_filename, csv);
+
+	function (err_append) {
+		if (err_append) throw err_append;
+	}
 }
